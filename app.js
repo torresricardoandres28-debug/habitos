@@ -13,7 +13,7 @@
   var DAYNAMES = ["domingo", "lunes", "martes", "miércoles", "jueves", "viernes", "sábado"];
   var DOW_ORDER = [1, 2, 3, 4, 5, 6, 0];
   var GROUPS = [["mañana", "Mañana"], ["tarde", "Tarde"], ["noche", "Noche"], ["", "Sin horario"]];
-  var state = { open: {}, acted: false, wasAllDone: false, install: null, habits: [], tombs: {}, loaded: false, tab: "hoy", date: null, followToday: true, modal: null, year: {}, undo: null };
+  var state = { onb: null, open: {}, acted: false, wasAllDone: false, install: null, habits: [], tombs: {}, loaded: false, tab: "hoy", date: null, followToday: true, modal: null, year: {}, undo: null };
 
   /* ---------- utilidades ---------- */
   function pad(n) { return String(n).padStart(2, "0"); }
@@ -150,14 +150,14 @@
     var i = h.days.indexOf(key);
     if (n >= h.target && i < 0) { h.days.push(key); h.days.sort(); }
     if (n < h.target && i >= 0) h.days.splice(i, 1);
-    touch(h); state.acted = true; save(); render();
+    touch(h); state.acted = true; save(); render(); firstMark();
   }
   function toggleDay(id, key) {
     var h = byId(id); if (!h) return;
     if (h.type === "count") { setCount(id, key, isDone(h, key) ? 0 : h.target); return; }
     var i = h.days.indexOf(key);
     if (i >= 0) h.days.splice(i, 1); else { h.days.push(key); h.days.sort(); }
-    touch(h); state.acted = true; save(); render();
+    touch(h); state.acted = true; save(); render(); firstMark();
   }
   function moveHabit(id, dir) {
     var list = sortHabits(active().slice()), i = list.findIndex(function (h) { return h.id === id; }), j = i + dir;
@@ -175,7 +175,7 @@
     var list = active().filter(function (h) { return isScheduled(h, d); });
     var done = list.filter(function (h) { return isDone(h, key); }).length;
     var all = list.length > 0 && done === list.length;
-    $("sub").textContent = fmtLong(d);
+    $("sub").textContent = ymd(d) === ymd(today()) ? greet() + " · " + fmtLong(d) : fmtLong(d);
     $("ringnum").innerHTML = !list.length ? "" : all ? "¡Todo listo!<small>día completo</small>" : done + " de " + list.length + "<small>completados</small>";
     $("ringbar").setAttribute("stroke-dashoffset", String(138.2 * (1 - (list.length ? done / list.length : 0))));
     if (all && !state.wasAllDone && state.acted) { if (navigator.vibrate) { try { navigator.vibrate(18); } catch (e) {} } toast("¡Día completo! Buen trabajo."); }
@@ -191,6 +191,12 @@
       '<button class="btn primary" data-act="new">Crear mi propio hábito</button></div>';
   }
 
+  function greet() { var hr = new Date().getHours(); return hr < 12 ? "Buenos días" : hr < 19 ? "Buenas tardes" : "Buenas noches"; }
+  function firstMark() {
+    if (lsGet("habitos.first") === "1" || !state.habits.some(function (h) { return h.days.length; })) return;
+    lsSet("habitos.first", "1"); lsSet("habitos.coach", "1");
+    toast("¡Primer día completado! Vuelve mañana para empezar tu racha.");
+  }
   function isCompact() { var p = lsGet("habitos.compact"); return p === "1" || (p === null && active().length > 5); }
   function lastActivity() {
     var m = "";
@@ -237,6 +243,8 @@
     var out = "", t = today(), la = lastActivity();
     if (isToday && state.habits.length && la && daysBetween(parse(la), t) >= 3 && lsGet("habitos.wb") !== ymd(t))
       out += '<div class="banner"><p><b>Qué bueno verte de nuevo.</b> Retomar vale más que no fallar nunca. Hoy basta con marcar un solo hábito.</p><button class="chip-btn" data-act="wbok">Entendido</button></div>';
+    if (!out && isToday && lsGet("habitos.coach") !== "1" && state.habits.length && !state.habits.some(function (h) { return h.days.length; }))
+      out += '<div class="banner"><p><b>Tu primer paso:</b> toca el círculo de un hábito para marcarlo como hecho hoy.</p></div>';
     if (!out && isToday && isMobileUA() && !isStandalone() && lsGet("habitos.hint") !== "1" && active().length)
       out += '<div class="banner"><p><b>Instálala como app.</b> ' + (state.install ? "Tendrás un ícono en tu pantalla de inicio." : esc(installText())) + '</p><div class="row">' +
         (state.install ? '<button class="chip-btn" data-act="installnow">Instalar</button>' : "") + '<button class="chip-btn" data-act="hintok">Ahora no</button></div></div>';
@@ -376,6 +384,7 @@
         (sync.client ? '<button class="menu-row" data-act="account"><span>Cuenta y sincronización</span><small>' + (!sync.user ? "Iniciar sesión" : sync.status === "syncing" ? "Sincronizando…" : sync.status === "error" ? "Sin sincronizar" : "Sincronizado") + "</small></button>" : "") +
         '<button class="menu-row" data-act="archived"><span>Hábitos archivados</span><small>' + archived().length + "</small></button>" +
         '<button class="menu-row" data-act="compact"><span>Vista compacta</span><small>' + (compactNow ? "Activada" : "Desactivada") + "</small></button>" +
+        '<button class="menu-row" data-act="onbintro"><span>Ver la introducción</span></button>' +
         '<button class="menu-row" data-act="share"><span>Compartir la app</span></button>' +
         (isStandalone() ? "" : '<button class="menu-row" data-act="installinfo"><span>Instalar en mi celular</span></button>') +
         '<button class="menu-row" data-act="export"><span>Descargar copia de seguridad</span></button>' +
@@ -503,6 +512,20 @@
       case "sugg": var s = SUGG[Number(el.dataset.i)]; addHabit(Object.assign({}, s)); toast("Hábito agregado"); break;
       case "export": exportData(); break;
       case "import": $("importfile").click(); break;
+      case "onbnext": onbNext(); break;
+      case "onbback": state.onb.step = 1; renderOnb(); break;
+      case "onbskip": onbClose(false); break;
+      case "onbfinish": onbClose(false); break;
+      case "onbaccount": onbClose(true); break;
+      case "onbhaveacct": onbClose(true); break;
+      case "onbdemo": state.onb.demo = !state.onb.demo; renderOnb(); break;
+      case "onbpick":
+        var oi = Number(el.dataset.i), pk = state.onb.picks, pos = pk.indexOf(oi);
+        if (pos >= 0) pk.splice(pos, 1);
+        else if (pk.length >= 3) { toast("Con 3 hábitos es suficiente para empezar"); break; }
+        else pk.push(oi);
+        renderOnb(); break;
+      case "onbintro": closeModal(); onbOpen(true); break;
       case "more": state.modal = { type: "more" }; renderModal(); break;
       case "expand": state.open[id] = !state.open[id]; render(); break;
       case "compact": lsSet("habitos.compact", isCompact() ? "0" : "1"); render(); renderModal(); break;
@@ -557,6 +580,73 @@
     if (ev.key === "Escape" && state.modal) closeModal();
     if (ev.key === "Enter" && state.modal && state.modal.type === "habit" && ev.target.id === "f-name") document.querySelector('[data-act="save"]').click();
   });
+
+  /* ---------- bienvenida ---------- */
+  var ICON_CHECK = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>';
+  function onbOpen(replay) { state.onb = { step: 1, picks: [], custom: "", created: false, demo: false, replay: !!replay }; renderOnb(); }
+  function onbClose(openAccount) {
+    state.onb = null; lsSet("habitos.onb", "1"); renderOnb(); render();
+    if (openAccount && sync.client) { state.modal = { type: "account", email: "", msg: "", busy: false }; renderModal(); }
+  }
+  function onbDots(n) { var d = ""; for (var i = 1; i <= 3; i++) d += '<i class="' + (i === n ? "on" : "") + '"></i>'; return '<div class="dots" role="img" aria-label="Paso ' + n + ' de 3">' + d + "</div>"; }
+  function renderOnb() {
+    var el = $("onb"), o = state.onb;
+    [$("app"), document.querySelector(".bottom"), $("fab")].forEach(function (e) { if (o) e.setAttribute("inert", ""); else e.removeAttribute("inert"); });
+    if (!o) { el.innerHTML = ""; return; }
+    var top = '<div class="onb-top"><div>' + (o.step === 2 ? '<button class="text-btn" data-act="onbback">‹ Atrás</button>' : "") + "</div>" +
+      (o.step < 3 ? '<button class="text-btn" data-act="onbskip">Saltar</button>' : "") + "</div>";
+    var main = "", foot = "";
+    if (o.step === 1) {
+      main = '<div class="onb-logo">' + ICON_CHECK + "</div>" +
+        '<h1 id="onb-h" tabindex="-1">Un hábito a la vez</h1>' +
+        '<p class="onb-lead">Marca lo que haces cada día, mira crecer tu racha y mejora poco a poco. Sin presión.</p>' +
+        '<div class="habit" style="--c:var(--h1)"><button class="check" data-act="onbdemo" aria-pressed="' + o.demo + '" aria-label="Probar: marcar hábito de ejemplo">' + CHECK + "</button>" +
+        '<div class="name">Caminar 20 minutos</div><span></span><div class="meta"><span class="streak">' + (o.demo ? "1 día seguido" : "Pruébalo: toca el círculo") + "</span></div></div>" +
+        '<ul class="onb-points"><li><span class="ic">1</span><span>Un toque al día para marcar cada hábito.</span></li>' +
+        '<li><span class="ic">2</span><span>Tu racha perdona un día de gracia, así un tropiezo no lo arruina todo.</span></li>' +
+        '<li><span class="ic">3</span><span>Funciona sin cuenta. Si quieres, la creas después para usarla en tu celular y tu computador.</span></li></ul>';
+      foot = onbDots(1) + '<button class="btn primary big" data-act="onbnext">Empezar</button>' +
+        (sync.client ? '<button class="text-btn" data-act="onbhaveacct">Ya tengo una cuenta</button>' : "");
+    } else if (o.step === 2) {
+      var full = o.picks.length >= 3;
+      main = '<h1 id="onb-h" tabindex="-1">Elige tu primer hábito</h1>' +
+        '<p class="onb-lead">Empieza pequeño: con 1 a 3 hábitos basta. Puedes cambiarlos cuando quieras.</p>' +
+        '<div class="picks">' + SUGG.map(function (g, i) {
+          var on = o.picks.indexOf(i) >= 0;
+          return '<button class="pick" data-act="onbpick" data-i="' + i + '" aria-pressed="' + on + '"' + (full && !on ? ' aria-disabled="true"' : "") + "><span>" + esc(g.name) +
+            (g.type === "count" ? "<small>" + g.target + " " + esc(g.unit) + " al día</small>" : "") + '</span><span class="tick">' + CHECK + "</span></button>";
+        }).join("") + "</div>" +
+        '<label class="f" for="f-onb-custom">O escribe el tuyo<input type="text" id="f-onb-custom" maxlength="60" value="' + esc(o.custom) + '" placeholder="Ej: Leer 1 página"></label>';
+      foot = onbDots(2) + '<button class="btn primary big" id="onb-continue" data-act="onbnext"' + (o.picks.length || o.custom.trim() ? "" : " disabled") + ">Continuar</button>" +
+        '<button class="text-btn" data-act="onbskip">Lo haré después</button>';
+    } else {
+      main = '<div class="onb-logo">' + ICON_CHECK + "</div>" +
+        '<h1 id="onb-h" tabindex="-1">' + (o.created ? "Todo listo" : "Así se usa") + "</h1>" +
+        '<ul class="onb-points"><li><span class="ic">1</span><span>Cada día, toca el círculo de un hábito para marcarlo como hecho.</span></li>' +
+        '<li><span class="ic">2</span><span>¿Olvidaste ayer? Toca la letra del día en la fila de la semana para corregirlo.</span></li>' +
+        '<li><span class="ic">3</span><span>En <b>Progreso</b> ves tus rachas y un resumen de la semana.</span></li></ul>' +
+        (isMobileUA() && !isStandalone() ? '<p class="demo-hint"><b>Consejo:</b> instálala para abrirla como una app. ' + esc(installText()) + "</p>" : "");
+      foot = onbDots(3) + '<button class="btn primary big" data-act="onbfinish">Ir a mis hábitos</button>' +
+        (sync.client ? '<button class="text-btn" data-act="onbaccount">Crear cuenta para sincronizar (opcional)</button>' : "");
+    }
+    el.innerHTML = '<div class="onb" role="dialog" aria-modal="true" aria-label="Bienvenida">' + top + '<div class="onb-main">' + main + '</div><div class="onb-foot">' + foot + "</div></div>";
+    var hd = $("onb-h"); if (hd) hd.focus({ preventScroll: true });
+  }
+  document.addEventListener("input", function (ev) {
+    if (ev.target.id === "f-onb-custom" && state.onb) {
+      state.onb.custom = ev.target.value;
+      var b = $("onb-continue"); if (b) b.disabled = !(state.onb.picks.length || state.onb.custom.trim());
+    }
+  });
+  function onbNext() {
+    var o = state.onb; if (!o) return;
+    if (o.step === 1) { o.step = o.replay ? 3 : 2; renderOnb(); return; }
+    if (o.step === 2) {
+      o.picks.forEach(function (i) { addHabit(Object.assign({}, SUGG[i])); });
+      if (o.custom.trim()) addHabit({ name: o.custom.trim() });
+      o.created = o.picks.length > 0 || !!o.custom.trim(); o.step = 3; renderOnb();
+    }
+  }
 
   function shareApp() {
     var url = location.href.split("#")[0].split("?")[0];
@@ -635,6 +725,7 @@
       }
       sortHabits(state.habits); persistLocal();
       sync.status = "ok"; sync.last = Date.now();
+      if (state.onb && !state.onb.created && !state.onb.replay && state.habits.length) onbClose(false);
     } catch (e) {
       sync.status = "error"; sync.err = (e && e.message) || "sin conexión";
     }
@@ -693,8 +784,10 @@
   try { state.habits = sortHabits((JSON.parse(lsGet("habitos.v1") || "[]")).map(normalize)); } catch (e) { state.habits = []; }
   try { state.tombs = JSON.parse(lsGet("habitos.tomb") || "{}"); } catch (e) { state.tombs = {}; }
   state.loaded = true;
+  if (state.habits.some(function (h) { return h.days.length; })) { lsSet("habitos.first", "1"); lsSet("habitos.coach", "1"); }
   render();
   initSync();
+  if (lsGet("habitos.onb") !== "1") { if (state.habits.length) lsSet("habitos.onb", "1"); else onbOpen(false); }
   setInterval(syncToday, 60000);
   document.addEventListener("visibilitychange", function () { if (!document.hidden) syncToday(); });
   if ("serviceWorker" in navigator) navigator.serviceWorker.register("sw.js").catch(function () {});

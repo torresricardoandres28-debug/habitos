@@ -205,6 +205,37 @@ body { padding-bottom: calc(150px + env(safe-area-inset-bottom, 0px)) !important
 .hint { color: var(--ink-2); font-size: 0.85rem; margin: -6px 0 0; }
 .link-btn { border: 0; background: transparent; color: var(--accent); font-weight: 600; text-decoration: underline; padding: 10px 0; text-align: left; }
 @media (prefers-reduced-motion: no-preference) { .check:active { transform: scale(.9); } .check[aria-pressed="true"] { animation: pop .25s ease; } @keyframes pop { 50% { transform: scale(1.12); } } }
+
+#onb:empty { display: none; }
+.onb { position: fixed; inset: 0; z-index: 30; background: var(--bg); display: flex; flex-direction: column; overflow-y: auto;
+  padding: max(16px, env(safe-area-inset-top, 0px)) max(16px, env(safe-area-inset-right, 0px)) max(16px, env(safe-area-inset-bottom, 0px)) max(16px, env(safe-area-inset-left, 0px)); }
+.onb-top { display: flex; justify-content: space-between; align-items: center; min-height: 48px; width: 100%; max-width: 480px; margin: 0 auto; }
+.text-btn { border: 0; background: transparent; color: var(--ink-2); font-weight: 600; min-height: 44px; padding: 0 8px; }
+.onb-main { flex: 1; display: flex; flex-direction: column; justify-content: center; gap: 18px; width: 100%; max-width: 480px; margin: 0 auto; padding-block: 12px; }
+.onb h1 { font-family: var(--display); font-size: 2.1rem; line-height: 1.08; margin: 0; letter-spacing: -0.02em; text-wrap: balance; }
+.onb h1:focus { outline: none; }
+.onb-lead { color: var(--ink-2); font-size: 1.05rem; margin: 0; max-width: 46ch; }
+.onb-foot { width: 100%; max-width: 480px; margin: 0 auto; display: flex; flex-direction: column; gap: 8px; padding-top: 12px; }
+.btn.big { min-height: 54px; font-size: 1.05rem; width: 100%; flex: none; }
+.dots { display: flex; gap: 6px; justify-content: center; padding-bottom: 6px; }
+.dots i { width: 8px; height: 8px; border-radius: 4px; background: var(--line); transition: width .2s; }
+.dots i.on { background: var(--accent); width: 24px; }
+.onb-logo { width: 64px; height: 64px; border-radius: 18px; background: var(--accent); display: grid; place-items: center; }
+.onb-logo svg { width: 36px; height: 36px; stroke: var(--accent-ink); stroke-width: 3; fill: none; stroke-linecap: round; stroke-linejoin: round; }
+.onb-points { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 14px; }
+.onb-points li { display: flex; gap: 12px; align-items: flex-start; line-height: 1.4; }
+.onb-points .ic { flex: none; width: 32px; height: 32px; border-radius: 10px; background: color-mix(in srgb, var(--accent) 14%, var(--surface)); display: grid; place-items: center; font-weight: 700; color: var(--accent); font-family: var(--display); }
+.demo-hint { color: var(--ink-2); font-size: 0.85rem; margin: -8px 0 0; }
+.picks { display: flex; flex-direction: column; gap: 8px; }
+.pick { display: flex; align-items: center; justify-content: space-between; gap: 10px; width: 100%; text-align: left; border: 1.5px solid var(--line); background: var(--surface); border-radius: 14px; padding: 12px 14px; min-height: 52px; font-weight: 600; }
+.pick small { display: block; color: var(--ink-2); font-weight: 500; font-size: 0.8rem; }
+.pick[aria-pressed="true"] { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 10%, var(--surface)); }
+.pick .tick { flex: none; width: 24px; height: 24px; border-radius: 50%; border: 2px solid var(--line); display: grid; place-items: center; }
+.pick[aria-pressed="true"] .tick { background: var(--accent); border-color: var(--accent); }
+.pick .tick svg { width: 14px; height: 14px; stroke: var(--accent-ink); stroke-width: 3.4; fill: none; opacity: 0; }
+.pick[aria-pressed="true"] .tick svg { opacity: 1; }
+.pick[aria-disabled="true"] { opacity: .5; }
+.btn:disabled { opacity: .45; cursor: default; }
 html { padding: env(safe-area-inset-top, 0px) 0 0; }
 body { margin: 0; }
 </style>
@@ -233,6 +264,7 @@ body { margin: 0; }
   <button id="tab-prog" data-tab="prog"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 20V11M12 20V4M19 20v-6"/></svg>Progreso</button>
   <button id="morebtn" data-act="more"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="5" cy="12" r="1.2"/><circle cx="12" cy="12" r="1.2"/><circle cx="19" cy="12" r="1.2"/></svg>Más</button>
 </div></nav>
+<div id="onb"></div>
 <div id="modal"></div>
 <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
 
