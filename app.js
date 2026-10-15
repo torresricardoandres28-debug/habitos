@@ -522,7 +522,6 @@
       case "onbpick":
         var oi = Number(el.dataset.i), pk = state.onb.picks, pos = pk.indexOf(oi);
         if (pos >= 0) pk.splice(pos, 1);
-        else if (pk.length >= 3) { toast("Con 3 hábitos es suficiente para empezar"); break; }
         else pk.push(oi);
         renderOnb(); break;
       case "onbintro": closeModal(); onbOpen(true); break;
@@ -608,12 +607,11 @@
       foot = onbDots(1) + '<button class="btn primary big" data-act="onbnext">Empezar</button>' +
         (sync.client ? '<button class="text-btn" data-act="onbhaveacct">Ya tengo una cuenta</button>' : "");
     } else if (o.step === 2) {
-      var full = o.picks.length >= 3;
       main = '<h1 id="onb-h" tabindex="-1">Elige tu primer hábito</h1>' +
-        '<p class="onb-lead">Empieza pequeño: con 1 a 3 hábitos basta. Puedes cambiarlos cuando quieras.</p>' +
+        '<p class="onb-lead">Empieza pequeño: con 1 a 3 hábitos basta, pero puedes elegir los que quieras. Los cambias cuando quieras.</p>' +
         '<div class="picks">' + SUGG.map(function (g, i) {
           var on = o.picks.indexOf(i) >= 0;
-          return '<button class="pick" data-act="onbpick" data-i="' + i + '" aria-pressed="' + on + '"' + (full && !on ? ' aria-disabled="true"' : "") + "><span>" + esc(g.name) +
+          return '<button class="pick" data-act="onbpick" data-i="' + i + '" aria-pressed="' + on + '"><span>' + esc(g.name) +
             (g.type === "count" ? "<small>" + g.target + " " + esc(g.unit) + " al día</small>" : "") + '</span><span class="tick">' + CHECK + "</span></button>";
         }).join("") + "</div>" +
         '<label class="f" for="f-onb-custom">O escribe el tuyo<input type="text" id="f-onb-custom" maxlength="60" value="' + esc(o.custom) + '" placeholder="Ej: Leer 1 página"></label>';
