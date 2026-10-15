@@ -13,7 +13,7 @@
   var DAYNAMES = ["domingo", "lunes", "martes", "miércoles", "jueves", "viernes", "sábado"];
   var DOW_ORDER = [1, 2, 3, 4, 5, 6, 0];
   var GROUPS = [["mañana", "Mañana"], ["tarde", "Tarde"], ["noche", "Noche"], ["", "Sin horario"]];
-  var state = { habits: [], loaded: false, tab: "hoy", date: null, followToday: true, modal: null, year: {}, undo: null };
+  var state = { habits: [], tombs: {}, loaded: false, tab: "hoy", date: null, followToday: true, modal: null, year: {}, undo: null };
 
   /* ---------- utilidades ---------- */
   function pad(n) { return String(n).padStart(2, "0"); }
@@ -51,6 +51,7 @@
     h.counts = h.counts && typeof h.counts === "object" ? h.counts : {};
     h.notes = h.notes && typeof h.notes === "object" ? h.notes : {};
     h.order = h.order || 0;
+    h.updatedAt = h.updatedAt || 0;
     h.archived = !!h.archived;
     h.goal = weeklyTarget(h);
     return h;
@@ -69,7 +70,9 @@
   function sortHabits(a) { return a.sort(function (x, y) { return x.order - y.order; }); }
   function byId(id) { return state.habits.find(function (h) { return h.id === id; }); }
 
-  function save() { lsSet("habitos.v1", JSON.stringify(state.habits)); }
+  function touch(h) { h.updatedAt = Date.now(); }
+  function persistLocal() { lsSet("habitos.v1", JSON.stringify(state.habits)); lsSet("habitos.tomb", JSON.stringify(state.tombs)); }
+  function save() { persistLocal(); scheduleSync(); }
   function pushUndo(label) { state.undo = clone(state.habits); toast(label, { act: "undo", label: "Deshacer" }); }
   function weekCount(h, d) {
     var s = daySet(h), w = weekStart(d), n = 0;
@@ -134,12 +137,12 @@
     var maxOrder = state.habits.reduce(function (m, h) { return Math.max(m, h.order || 0); }, 0);
     var h = normalize(Object.assign({
       id: "h" + Date.now() + Math.floor(Math.random() * 1000), color: COLORS[active().length % COLORS.length],
-      days: [], counts: {}, notes: {}, createdAt: ymd(today()), archived: false, order: maxOrder + 1
+      days: [], counts: {}, notes: {}, createdAt: ymd(today()), archived: false, order: maxOrder + 1, updatedAt: Date.now()
     }, data));
     state.habits.push(h); save(); render();
   }
-  function patchHabit(id, patch) { var h = byId(id); if (!h) return; Object.assign(h, patch); normalize(h); save(); render(); }
-  function deleteHabit(id) { state.habits = state.habits.filter(function (h) { return h.id !== id; }); save(); render(); }
+  function patchHabit(id, patch) { var h = byId(id); if (!h) return; Object.assign(h, patch); normalize(h); touch(h); save(); render(); }
+  function deleteHabit(id) { state.habits = state.habits.filter(function (h) { return h.id !== id; }); state.tombs[id] = Date.now(); save(); render(); }
   function setCount(id, key, n) {
     var h = byId(id); if (!h) return;
     n = Math.max(0, Math.min(999, n));
@@ -147,19 +150,19 @@
     var i = h.days.indexOf(key);
     if (n >= h.target && i < 0) { h.days.push(key); h.days.sort(); }
     if (n < h.target && i >= 0) h.days.splice(i, 1);
-    save(); render();
+    touch(h); save(); render();
   }
   function toggleDay(id, key) {
     var h = byId(id); if (!h) return;
     if (h.type === "count") { setCount(id, key, isDone(h, key) ? 0 : h.target); return; }
     var i = h.days.indexOf(key);
     if (i >= 0) h.days.splice(i, 1); else { h.days.push(key); h.days.sort(); }
-    save(); render();
+    touch(h); save(); render();
   }
   function moveHabit(id, dir) {
     var list = sortHabits(active().slice()), i = list.findIndex(function (h) { return h.id === id; }), j = i + dir;
     if (i < 0 || j < 0 || j >= list.length) return;
-    list.forEach(function (h, n) { h.order = n + 1; });
+    list.forEach(function (h, n) { h.order = n + 1; touch(h); });
     var tmp = list[i].order; list[i].order = list[j].order; list[j].order = tmp;
     sortHabits(state.habits); save(); render(); renderModal();
   }
@@ -175,6 +178,9 @@
     $("ringnum").innerHTML = list.length ? done + " de " + list.length + "<small>completados</small>" : "";
     $("ringbar").setAttribute("stroke-dashoffset", String(138.2 * (1 - (list.length ? done / list.length : 0))));
     $("archbtn").textContent = "Archivados (" + archived().length + ")";
+    var ab = $("accbtn");
+    ab.hidden = !sync.client;
+    ab.textContent = !sync.user ? "Iniciar sesión" : sync.status === "syncing" ? "Sincronizando…" : sync.status === "error" ? "Sin sincronizar" : "Sincronizado";
     document.querySelectorAll(".tabs button").forEach(function (b) { b.setAttribute("aria-selected", String(b.dataset.tab === state.tab)); });
   }
 
@@ -333,6 +339,21 @@
         '<label class="f" for="f-note">Nota<textarea id="f-note" rows="4" maxlength="500" placeholder="Cómo te fue, por qué no pudiste, qué ayudó…">' + esc(md.text) + "</textarea></label>" +
         '<div class="row"><button class="btn primary" data-act="savenote">Guardar</button><button class="btn" data-act="close">Cancelar</button>' +
         (md.text ? '<button class="btn danger" data-act="delnote">Borrar nota</button>' : "") + "</div>";
+    } else if (md.type === "account") {
+      if (sync.user) {
+        body = "<h2>Tu cuenta</h2><p class='muted'>Sesión iniciada como <b>" + esc(sync.user.email || "") + "</b></p>" +
+          "<p class='muted'>" + (sync.status === "syncing" ? "Sincronizando…" : sync.status === "error" ? "No se pudo sincronizar: " + esc(sync.err) : sync.last ? "Última sincronización: " + esc(new Date(sync.last).toLocaleTimeString("es", { hour: "2-digit", minute: "2-digit" })) : "Aún no se ha sincronizado.") + "</p>" +
+          '<div class="row"><button class="btn primary" data-act="syncnow">Sincronizar ahora</button><button class="btn" data-act="close">Cerrar</button></div>' +
+          '<div class="row"><button class="btn" data-act="signout">Cerrar sesión</button></div>' +
+          "<p class='muted'>Al cerrar sesión, tus hábitos siguen guardados en este dispositivo.</p>";
+      } else {
+        body = "<h2>Iniciar sesión</h2><p class='muted'>Con tu cuenta, tus hábitos se sincronizan entre tu celular y tu computador.</p>" +
+          '<label class="f" for="f-email">Correo<input type="email" id="f-email" autocomplete="email" value="' + esc(md.email || "") + '"></label>' +
+          '<label class="f" for="f-pass">Contraseña (mínimo 6 caracteres)<input type="password" id="f-pass" autocomplete="current-password"></label>' +
+          (md.msg ? '<p class="msg">' + esc(md.msg) + "</p>" : "") +
+          '<div class="row"><button class="btn primary" data-act="signin"' + (md.busy ? " disabled" : "") + '>Iniciar sesión</button><button class="btn" data-act="signup"' + (md.busy ? " disabled" : "") + '>Crear cuenta</button></div>' +
+          '<div class="row"><button class="btn" data-act="close">Cerrar</button></div>';
+      }
     } else if (md.type === "archived") {
       var list = archived();
       body = "<h2>Hábitos archivados</h2>" + (list.length ? '<div class="list">' + list.map(function (h) {
@@ -393,9 +414,10 @@
         cur.days = Array.from(new Set(cur.days.concat(h.days || []))).sort();
         cur.counts = Object.assign({}, h.counts || {}, cur.counts);
         cur.notes = Object.assign({}, h.notes || {}, cur.notes);
+        touch(cur);
       } else {
         h.id = String(h.id); h.createdAt = h.createdAt || ymd(today());
-        state.habits.push(normalize(h));
+        state.habits.push(normalize(h)); touch(h);
       }
     });
     sortHabits(state.habits); save(); render();
@@ -430,14 +452,18 @@
       case "sugg": var s = SUGG[Number(el.dataset.i)]; addHabit(Object.assign({}, s)); toast("Hábito agregado"); break;
       case "export": exportData(); break;
       case "import": $("importfile").click(); break;
+      case "account": state.modal = { type: "account", email: "", msg: "", busy: false }; renderModal(); break;
+      case "syncnow": runSync(); break;
+      case "signin": case "signup": doAuth(act); break;
+      case "signout": sync.client.auth.signOut().then(function () { closeModal(); toast("Sesión cerrada"); }); break;
       case "archived": state.modal = { type: "archived" }; renderModal(); break;
       case "year": state.year[id] = !state.year[id]; render(); break;
       case "note": h = byId(id); state.modal = { type: "note", id: id, key: selKey, text: h.notes[selKey] || "" }; renderModal(); $("f-note").focus(); break;
       case "savenote":
         h = byId(md.id); var txt = $("f-note").value.trim();
         if (txt) h.notes[md.key] = txt; else delete h.notes[md.key];
-        save(); closeModal(); render(); break;
-      case "delnote": h = byId(md.id); delete h.notes[md.key]; save(); closeModal(); render(); break;
+        touch(h); save(); closeModal(); render(); break;
+      case "delnote": h = byId(md.id); delete h.notes[md.key]; touch(h); save(); closeModal(); render(); break;
       case "color": captureForm(); md.color = el.dataset.color; renderModal(); break;
       case "dow":
         captureForm(); var d = Number(el.dataset.d), i = md.days.indexOf(d);
@@ -461,7 +487,7 @@
       case "restore": patchHabit(id, { archived: false }); renderModal(); toast("Hábito restaurado"); break;
       case "delarch": pushUndo("Hábito borrado"); deleteHabit(id); renderModal(); break;
       case "undo":
-        if (state.undo) { state.habits = sortHabits(state.undo.map(normalize)); state.undo = null; save(); render(); renderModal(); $("toast").hidden = true; }
+        if (state.undo) { state.habits = sortHabits(state.undo.map(normalize)); state.habits.forEach(touch); state.undo = null; save(); render(); renderModal(); $("toast").hidden = true; }
         break;
     }
   });
@@ -470,6 +496,97 @@
     if (ev.key === "Enter" && state.modal && state.modal.type === "habit" && ev.target.id === "f-name") document.querySelector('[data-act="save"]').click();
   });
 
+  /* ---------- sincronización (Supabase) ---------- */
+  var cfg = window.HABITOS_CONFIG || {};
+  var sync = { client: null, user: null, status: "off", last: 0, err: "", timer: null, running: false, again: false };
+  function initSync() {
+    if (!(cfg.SUPABASE_URL && cfg.SUPABASE_ANON_KEY && window.supabase)) return;
+    sync.client = window.supabase.createClient(cfg.SUPABASE_URL, cfg.SUPABASE_ANON_KEY, { auth: { persistSession: true, autoRefreshToken: true } });
+    sync.client.auth.getSession().then(function (r) { setUser(r.data && r.data.session ? r.data.session.user : null); });
+    sync.client.auth.onAuthStateChange(function (ev, session) { setUser(session ? session.user : null); });
+    setInterval(function () { if (!document.hidden) runSync(); }, 120000);
+    window.addEventListener("online", runSync);
+    document.addEventListener("visibilitychange", function () { if (!document.hidden) runSync(); });
+  }
+  function setUser(u) {
+    var changed = (u ? u.id : null) !== (sync.user ? sync.user.id : null);
+    sync.user = u || null;
+    sync.status = u ? "idle" : "out";
+    render();
+    if (state.modal && state.modal.type === "account" && changed) renderModal();
+    if (u && changed) runSync();
+  }
+  function scheduleSync() {
+    if (!sync.user) return;
+    clearTimeout(sync.timer);
+    sync.timer = setTimeout(runSync, 1500);
+  }
+  async function runSync() {
+    if (!sync.client || !sync.user) return;
+    if (sync.running) { sync.again = true; return; }
+    sync.running = true; sync.status = "syncing"; sync.err = ""; renderHeader();
+    try {
+      var uid = sync.user.id;
+      var res = await sync.client.from("habits").select("id,data,updated_at,deleted").eq("user_id", uid);
+      if (res.error) throw res.error;
+      var remote = {};
+      res.data.forEach(function (r) { remote[r.id] = r; });
+      res.data.forEach(function (r) {
+        var local = byId(r.id), tomb = state.tombs[r.id] || 0, lu = local ? local.updatedAt : 0;
+        if (r.deleted) {
+          if (local && lu <= r.updated_at) state.habits = state.habits.filter(function (h) { return h.id !== r.id; });
+          return;
+        }
+        if (!local && tomb >= r.updated_at) return;
+        if (!local || r.updated_at > lu) {
+          var h = normalize(r.data || {}); h.id = r.id; h.updatedAt = r.updated_at;
+          state.habits = state.habits.filter(function (x) { return x.id !== r.id; }); state.habits.push(h);
+          delete state.tombs[r.id];
+        }
+      });
+      var rows = [];
+      state.habits.forEach(function (h) {
+        var r = remote[h.id];
+        if (!h.updatedAt) touch(h);
+        if (!r || h.updatedAt > r.updated_at) rows.push({ user_id: uid, id: h.id, data: h, updated_at: h.updatedAt, deleted: false });
+      });
+      Object.keys(state.tombs).forEach(function (id) {
+        var r = remote[id], local = byId(id), ts = state.tombs[id];
+        if (local && local.updatedAt > ts) { delete state.tombs[id]; return; }
+        if (!r || (!r.deleted && r.updated_at < ts)) rows.push({ user_id: uid, id: id, data: {}, updated_at: ts, deleted: true });
+      });
+      if (rows.length) {
+        var up = await sync.client.from("habits").upsert(rows, { onConflict: "user_id,id" });
+        if (up.error) throw up.error;
+      }
+      sortHabits(state.habits); persistLocal();
+      sync.status = "ok"; sync.last = Date.now();
+    } catch (e) {
+      sync.status = "error"; sync.err = (e && e.message) || "sin conexión";
+    }
+    sync.running = false;
+    render();
+    if (state.modal && state.modal.type === "account") renderModal();
+    if (sync.again) { sync.again = false; runSync(); }
+  }
+  async function doAuth(kind) {
+    var md = state.modal, email = $("f-email").value.trim(), pass = $("f-pass").value;
+    md.email = email;
+    if (!email || pass.length < 6) { md.msg = "Escribe tu correo y una contraseña de al menos 6 caracteres."; renderModal(); return; }
+    md.busy = true; md.msg = ""; renderModal();
+    try {
+      var r = kind === "signin" ? await sync.client.auth.signInWithPassword({ email: email, password: pass }) : await sync.client.auth.signUp({ email: email, password: pass });
+      if (r.error) throw r.error;
+      if (kind === "signup" && !(r.data && r.data.session)) { md.busy = false; md.msg = "Cuenta creada. Revisa tu correo para confirmarla y luego inicia sesión."; renderModal(); return; }
+      closeModal(); toast("Sesión iniciada");
+    } catch (e) {
+      var m = (e && e.message) || "";
+      md.busy = false;
+      md.msg = /invalid login/i.test(m) ? "Correo o contraseña incorrectos." : /already registered/i.test(m) ? "Ese correo ya tiene cuenta. Toca Iniciar sesión." : /email not confirmed/i.test(m) ? "Confirma tu correo con el enlace que te enviamos." : "No se pudo completar: " + m;
+      renderModal();
+    }
+  }
+
   /* ---------- arranque ---------- */
   function syncToday() {
     if (state.followToday && ymd(state.date) !== ymd(today())) { state.date = today(); render(); }
@@ -477,8 +594,10 @@
   var savedTab = lsGet("habitos.tab"); if (savedTab === "hoy" || savedTab === "prog") state.tab = savedTab;
   state.date = today();
   try { state.habits = sortHabits((JSON.parse(lsGet("habitos.v1") || "[]")).map(normalize)); } catch (e) { state.habits = []; }
+  try { state.tombs = JSON.parse(lsGet("habitos.tomb") || "{}"); } catch (e) { state.tombs = {}; }
   state.loaded = true;
   render();
+  initSync();
   setInterval(syncToday, 60000);
   document.addEventListener("visibilitychange", function () { if (!document.hidden) syncToday(); });
   if ("serviceWorker" in navigator) navigator.serviceWorker.register("sw.js").catch(function () {});
