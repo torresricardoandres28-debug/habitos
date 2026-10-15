@@ -13,7 +13,7 @@
   var DAYNAMES = ["domingo", "lunes", "martes", "miércoles", "jueves", "viernes", "sábado"];
   var DOW_ORDER = [1, 2, 3, 4, 5, 6, 0];
   var GROUPS = [["mañana", "Mañana"], ["tarde", "Tarde"], ["noche", "Noche"], ["", "Sin horario"]];
-  var state = { habits: [], tombs: {}, loaded: false, tab: "hoy", date: null, followToday: true, modal: null, year: {}, undo: null };
+  var state = { open: {}, acted: false, wasAllDone: false, install: null, habits: [], tombs: {}, loaded: false, tab: "hoy", date: null, followToday: true, modal: null, year: {}, undo: null };
 
   /* ---------- utilidades ---------- */
   function pad(n) { return String(n).padStart(2, "0"); }
@@ -150,14 +150,14 @@
     var i = h.days.indexOf(key);
     if (n >= h.target && i < 0) { h.days.push(key); h.days.sort(); }
     if (n < h.target && i >= 0) h.days.splice(i, 1);
-    touch(h); save(); render();
+    touch(h); state.acted = true; save(); render();
   }
   function toggleDay(id, key) {
     var h = byId(id); if (!h) return;
     if (h.type === "count") { setCount(id, key, isDone(h, key) ? 0 : h.target); return; }
     var i = h.days.indexOf(key);
     if (i >= 0) h.days.splice(i, 1); else { h.days.push(key); h.days.sort(); }
-    touch(h); save(); render();
+    touch(h); state.acted = true; save(); render();
   }
   function moveHabit(id, dir) {
     var list = sortHabits(active().slice()), i = list.findIndex(function (h) { return h.id === id; }), j = i + dir;
@@ -174,14 +174,14 @@
     var d = state.date, key = ymd(d);
     var list = active().filter(function (h) { return isScheduled(h, d); });
     var done = list.filter(function (h) { return isDone(h, key); }).length;
+    var all = list.length > 0 && done === list.length;
     $("sub").textContent = fmtLong(d);
-    $("ringnum").innerHTML = list.length ? done + " de " + list.length + "<small>completados</small>" : "";
+    $("ringnum").innerHTML = !list.length ? "" : all ? "¡Todo listo!<small>día completo</small>" : done + " de " + list.length + "<small>completados</small>";
     $("ringbar").setAttribute("stroke-dashoffset", String(138.2 * (1 - (list.length ? done / list.length : 0))));
-    $("archbtn").textContent = "Archivados (" + archived().length + ")";
-    var ab = $("accbtn");
-    ab.hidden = !sync.client;
-    ab.textContent = !sync.user ? "Iniciar sesión" : sync.status === "syncing" ? "Sincronizando…" : sync.status === "error" ? "Sin sincronizar" : "Sincronizado";
-    document.querySelectorAll(".tabs button").forEach(function (b) { b.setAttribute("aria-selected", String(b.dataset.tab === state.tab)); });
+    if (all && !state.wasAllDone && state.acted) { if (navigator.vibrate) { try { navigator.vibrate(18); } catch (e) {} } toast("¡Día completo! Buen trabajo."); }
+    state.wasAllDone = all; state.acted = false;
+    document.querySelectorAll(".bottom [data-tab]").forEach(function (b) { if (b.dataset.tab === state.tab) b.setAttribute("aria-current", "page"); else b.removeAttribute("aria-current"); });
+    $("fab").hidden = !(state.tab === "hoy" && state.loaded && active().length > 0);
   }
 
   function emptyState() {
@@ -191,9 +191,22 @@
       '<button class="btn primary" data-act="new">Crear mi propio hábito</button></div>';
   }
 
+  function isCompact() { var p = lsGet("habitos.compact"); return p === "1" || (p === null && active().length > 5); }
+  function lastActivity() {
+    var m = "";
+    state.habits.forEach(function (h) { h.days.forEach(function (k) { if (k > m) m = k; }); });
+    return m;
+  }
+  function isStandalone() { return (window.matchMedia && window.matchMedia("(display-mode: standalone)").matches) || window.navigator.standalone === true; }
+  function isIOS() { return /iphone|ipad|ipod/i.test(navigator.userAgent); }
+  function isMobileUA() { return /android|iphone|ipad|ipod/i.test(navigator.userAgent); }
+  function installText() {
+    return isIOS() ? "En iPhone: toca el botón Compartir de Safari (el cuadro con una flecha) y elige “Agregar a pantalla de inicio”."
+      : "En Android: abre el menú ⋮ de Chrome y elige “Instalar app” o “Agregar a pantalla de inicio”.";
+  }
   function rowHtml(h, sel) {
     var selKey = ymd(sel), set = daySet(h), on = isDone(h, selKey), n = countOn(h, selKey), t = today();
-    var ws = weekStart(sel), strip = "";
+    var ws = weekStart(sel), strip = "", compact = isCompact(), open = !compact || !!state.open[h.id];
     for (var i = 0; i < 7; i++) {
       var d = addDays(ws, i), k = ymd(d);
       strip += '<button data-act="day" data-id="' + h.id + '" data-key="' + k + '" aria-pressed="' + set.has(k) + '" aria-label="' + esc(d.toLocaleDateString("es", { weekday: "long", day: "numeric" })) + '"' +
@@ -206,13 +219,29 @@
     return '<div class="habit" style="--c:' + hcolor(h) + '">' + main +
       '<div class="name">' + esc(h.name) + "</div>" +
       '<button class="edit" data-act="edit" data-id="' + h.id + '" aria-label="Editar ' + esc(h.name) + '">···</button>' +
-      '<div class="meta"><span class="streak">' + streakText(h) + "</span>" +
+      '<div class="meta"><span class="streak">' + streakLine(h) + "</span>" +
       "<span>Semana " + weekCount(h, sel) + "/" + weeklyTarget(h) + "</span>" +
       (h.type === "count" ? "<span>" + n + " de " + h.target + (h.unit ? " " + esc(h.unit) : "") + "</span>" + (n > 0 ? '<button class="mini" data-act="dec" data-id="' + h.id + '">−1</button>' : "") : "") +
-      '<button class="mini" data-act="note" data-id="' + h.id + '" aria-label="Nota del día">' + (hasNote ? "Nota ●" : "Nota") + "</button></div>" +
-      '<div class="strip">' + strip + "</div></div>";
+      '<button class="mini" data-act="note" data-id="' + h.id + '" aria-label="Nota del día">' + (hasNote ? "Nota ●" : "Nota") + "</button>" +
+      (compact ? '<button class="mini" data-act="expand" data-id="' + h.id + '" aria-expanded="' + open + '">Semana</button>' : "") + "</div>" +
+      (open ? '<div class="strip">' + strip + "</div>" : "") + "</div>";
   }
 
+  function streakLine(h) {
+    var st = streakInfo(h);
+    if (st.cur) return streakText(h);
+    if (st.best > 1) return "Tu mejor racha: " + st.best + (st.unit === "semanas" ? " semanas" : " días");
+    return "Empieza hoy";
+  }
+  function banners(isToday) {
+    var out = "", t = today(), la = lastActivity();
+    if (isToday && state.habits.length && la && daysBetween(parse(la), t) >= 3 && lsGet("habitos.wb") !== ymd(t))
+      out += '<div class="banner"><p><b>Qué bueno verte de nuevo.</b> Retomar vale más que no fallar nunca. Hoy basta con marcar un solo hábito.</p><button class="chip-btn" data-act="wbok">Entendido</button></div>';
+    if (!out && isToday && isMobileUA() && !isStandalone() && lsGet("habitos.hint") !== "1" && active().length)
+      out += '<div class="banner"><p><b>Instálala como app.</b> ' + (state.install ? "Tendrás un ícono en tu pantalla de inicio." : esc(installText())) + '</p><div class="row">' +
+        (state.install ? '<button class="chip-btn" data-act="installnow">Instalar</button>' : "") + '<button class="chip-btn" data-act="hintok">Ahora no</button></div></div>';
+    return out;
+  }
   function renderToday() {
     var t = today(), sel = state.date, isToday = ymd(sel) === ymd(t);
     var html = '<div class="daynav"><button class="icon-btn" data-act="prev" aria-label="Día anterior">‹</button>' +
@@ -221,6 +250,7 @@
       '<button class="icon-btn" data-act="next" aria-label="Día siguiente"' + (isToday ? " disabled" : "") + ">›</button></div>";
     if (!state.loaded) return html + '<div class="empty"><p>Cargando tus hábitos…</p></div>';
     var list = active();
+    if (list.length) html += banners(isToday);
     if (!list.length) return html + emptyState();
     var sched = list.filter(function (h) { return isScheduled(h, sel); });
     var rest = list.filter(function (h) { return !isScheduled(h, sel); });
@@ -231,7 +261,7 @@
       if (items.length) html += '<h2 class="group-h">' + g[1] + '</h2><div class="list">' + items.map(function (h) { return rowHtml(h, sel); }).join("") + "</div>";
     });
     if (rest.length) html += '<p class="rest">No programados este día: ' + rest.map(function (h) { return esc(h.name); }).join(", ") + ".</p>";
-    return html + '<button class="add" data-act="new">+ Nuevo hábito</button>';
+    return html;
   }
 
   function weeklySummary(list) {
@@ -322,6 +352,7 @@
       var gOpts = GROUPS.slice().reverse().map(function (g) { return '<option value="' + g[0] + '"' + (g[0] === e.group ? " selected" : "") + ">" + g[1] + "</option>"; }).join("");
       body = "<h2>" + (e.id ? "Editar hábito" : "Nuevo hábito") + "</h2>" +
         '<label class="f" for="f-name">Nombre<input type="text" id="f-name" maxlength="60" value="' + esc(e.name) + '" placeholder="Ej: Leer 10 páginas"></label>' +
+        (e.id ? "" : '<p class="hint">Hazlo tan pequeño que sea difícil fallar. Por ejemplo, “leer 1 página” en lugar de “leer un libro”.</p>') +
         '<label class="f" for="f-type">Tipo<select id="f-type" data-rr="1"><option value="check"' + (e.kind === "check" ? " selected" : "") + '>Sí o no</option><option value="count"' + (e.kind === "count" ? " selected" : "") + ">Con cantidad</option></select></label>" +
         (e.kind === "count" ? '<div class="row"><label class="f grow" for="f-target">Meta diaria<input type="number" id="f-target" min="1" max="999" value="' + e.target + '"></label>' +
           '<label class="f grow" for="f-unit">Unidad<input type="text" id="f-unit" maxlength="20" value="' + esc(e.unit) + '" placeholder="vasos, minutos…"></label></div>' : "") +
@@ -339,19 +370,39 @@
         '<label class="f" for="f-note">Nota<textarea id="f-note" rows="4" maxlength="500" placeholder="Cómo te fue, por qué no pudiste, qué ayudó…">' + esc(md.text) + "</textarea></label>" +
         '<div class="row"><button class="btn primary" data-act="savenote">Guardar</button><button class="btn" data-act="close">Cancelar</button>' +
         (md.text ? '<button class="btn danger" data-act="delnote">Borrar nota</button>' : "") + "</div>";
+    } else if (md.type === "more") {
+      var compactNow = isCompact();
+      body = "<h2>Más opciones</h2><div class='menu'>" +
+        (sync.client ? '<button class="menu-row" data-act="account"><span>Cuenta y sincronización</span><small>' + (!sync.user ? "Iniciar sesión" : sync.status === "syncing" ? "Sincronizando…" : sync.status === "error" ? "Sin sincronizar" : "Sincronizado") + "</small></button>" : "") +
+        '<button class="menu-row" data-act="archived"><span>Hábitos archivados</span><small>' + archived().length + "</small></button>" +
+        '<button class="menu-row" data-act="compact"><span>Vista compacta</span><small>' + (compactNow ? "Activada" : "Desactivada") + "</small></button>" +
+        '<button class="menu-row" data-act="share"><span>Compartir la app</span></button>' +
+        (isStandalone() ? "" : '<button class="menu-row" data-act="installinfo"><span>Instalar en mi celular</span></button>') +
+        '<button class="menu-row" data-act="export"><span>Descargar copia de seguridad</span></button>' +
+        '<button class="menu-row" data-act="import"><span>Restaurar copia de seguridad</span></button></div>' +
+        '<div class="row"><button class="btn" data-act="close">Cerrar</button></div>';
+    } else if (md.type === "install") {
+      body = "<h2>Instalar la app</h2><p class='muted'>" + esc(installText()) + "</p><p class='muted'>En el computador, usa el ícono de instalar que aparece a la derecha de la barra de direcciones de Chrome o Edge.</p>" +
+        '<div class="row"><button class="btn" data-act="close">Cerrar</button></div>';
+    } else if (md.type === "newpass") {
+      body = "<h2>Nueva contraseña</h2><label class='f' for='f-newpass'>Contraseña nueva (mínimo 6 caracteres)<input type='password' id='f-newpass' autocomplete='new-password'></label>" +
+        (md.msg ? '<p class="msg">' + esc(md.msg) + "</p>" : "") + '<div class="row"><button class="btn primary" data-act="setpw">Guardar contraseña</button><button class="btn" data-act="close">Cancelar</button></div>';
     } else if (md.type === "account") {
       if (sync.user) {
         body = "<h2>Tu cuenta</h2><p class='muted'>Sesión iniciada como <b>" + esc(sync.user.email || "") + "</b></p>" +
           "<p class='muted'>" + (sync.status === "syncing" ? "Sincronizando…" : sync.status === "error" ? "No se pudo sincronizar: " + esc(sync.err) : sync.last ? "Última sincronización: " + esc(new Date(sync.last).toLocaleTimeString("es", { hour: "2-digit", minute: "2-digit" })) : "Aún no se ha sincronizado.") + "</p>" +
           '<div class="row"><button class="btn primary" data-act="syncnow">Sincronizar ahora</button><button class="btn" data-act="close">Cerrar</button></div>' +
           '<div class="row"><button class="btn" data-act="signout">Cerrar sesión</button></div>' +
-          "<p class='muted'>Al cerrar sesión, tus hábitos siguen guardados en este dispositivo.</p>";
+          "<p class='muted'>Al cerrar sesión, tus hábitos siguen guardados en este dispositivo.</p>" +
+          '<div class="row"><button class="btn danger" data-act="wipe">' + (md.confirmWipe ? "Toca otra vez para borrar" : "Borrar mis datos de la nube") + "</button></div>";
       } else {
         body = "<h2>Iniciar sesión</h2><p class='muted'>Con tu cuenta, tus hábitos se sincronizan entre tu celular y tu computador.</p>" +
           '<label class="f" for="f-email">Correo<input type="email" id="f-email" autocomplete="email" value="' + esc(md.email || "") + '"></label>' +
           '<label class="f" for="f-pass">Contraseña (mínimo 6 caracteres)<input type="password" id="f-pass" autocomplete="current-password"></label>' +
           (md.msg ? '<p class="msg">' + esc(md.msg) + "</p>" : "") +
           '<div class="row"><button class="btn primary" data-act="signin"' + (md.busy ? " disabled" : "") + '>Iniciar sesión</button><button class="btn" data-act="signup"' + (md.busy ? " disabled" : "") + '>Crear cuenta</button></div>' +
+          '<button class="link-btn" data-act="resetpw">¿Olvidaste tu contraseña?</button>' +
+          "<p class='hint'>Tus hábitos son privados: cada cuenta solo puede ver sus propios datos. Este es un proyecto personal, sin garantías de servicio.</p>" +
           '<div class="row"><button class="btn" data-act="close">Cerrar</button></div>';
       }
     } else if (md.type === "archived") {
@@ -452,6 +503,17 @@
       case "sugg": var s = SUGG[Number(el.dataset.i)]; addHabit(Object.assign({}, s)); toast("Hábito agregado"); break;
       case "export": exportData(); break;
       case "import": $("importfile").click(); break;
+      case "more": state.modal = { type: "more" }; renderModal(); break;
+      case "expand": state.open[id] = !state.open[id]; render(); break;
+      case "compact": lsSet("habitos.compact", isCompact() ? "0" : "1"); render(); renderModal(); break;
+      case "wbok": lsSet("habitos.wb", ymd(today())); render(); break;
+      case "hintok": lsSet("habitos.hint", "1"); render(); break;
+      case "installnow": if (state.install) { state.install.prompt(); state.install = null; lsSet("habitos.hint", "1"); render(); } break;
+      case "installinfo": state.modal = { type: "install" }; renderModal(); break;
+      case "share": shareApp(); break;
+      case "resetpw": resetPassword(); break;
+      case "setpw": setNewPassword(); break;
+      case "wipe": wipeCloud(); break;
       case "account": state.modal = { type: "account", email: "", msg: "", busy: false }; renderModal(); break;
       case "syncnow": runSync(); break;
       case "signin": case "signup": doAuth(act); break;
@@ -496,6 +558,15 @@
     if (ev.key === "Enter" && state.modal && state.modal.type === "habit" && ev.target.id === "f-name") document.querySelector('[data-act="save"]').click();
   });
 
+  function shareApp() {
+    var url = location.href.split("#")[0].split("?")[0];
+    if (navigator.share) { navigator.share({ title: "Mis Hábitos", text: "Registro de hábitos con rachas y progreso. Gratis.", url: url }).catch(function () {}); return; }
+    var done = function () { toast("Enlace copiado"); };
+    if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(url).then(done, function () { toast(url); });
+    else toast(url);
+  }
+  window.addEventListener("beforeinstallprompt", function (e) { e.preventDefault(); state.install = e; if (state.loaded) render(); });
+
   /* ---------- sincronización (Supabase) ---------- */
   var cfg = window.HABITOS_CONFIG || {};
   var sync = { client: null, user: null, status: "off", last: 0, err: "", timer: null, running: false, again: false };
@@ -503,7 +574,10 @@
     if (!(cfg.SUPABASE_URL && cfg.SUPABASE_ANON_KEY && window.supabase)) return;
     sync.client = window.supabase.createClient(cfg.SUPABASE_URL, cfg.SUPABASE_ANON_KEY, { auth: { persistSession: true, autoRefreshToken: true } });
     sync.client.auth.getSession().then(function (r) { setUser(r.data && r.data.session ? r.data.session.user : null); });
-    sync.client.auth.onAuthStateChange(function (ev, session) { setUser(session ? session.user : null); });
+    sync.client.auth.onAuthStateChange(function (ev, session) {
+      setUser(session ? session.user : null);
+      if (ev === "PASSWORD_RECOVERY") { state.modal = { type: "newpass", msg: "" }; renderModal(); }
+    });
     setInterval(function () { if (!document.hidden) runSync(); }, 120000);
     window.addEventListener("online", runSync);
     document.addEventListener("visibilitychange", function () { if (!document.hidden) runSync(); });
@@ -568,6 +642,29 @@
     render();
     if (state.modal && state.modal.type === "account") renderModal();
     if (sync.again) { sync.again = false; runSync(); }
+  }
+  async function resetPassword() {
+    var md = state.modal, el = $("f-email"), email = el ? el.value.trim() : "";
+    md.email = email;
+    if (!email) { md.msg = "Escribe tu correo arriba y toca de nuevo “¿Olvidaste tu contraseña?”."; renderModal(); return; }
+    var r = await sync.client.auth.resetPasswordForEmail(email, { redirectTo: location.origin + location.pathname });
+    md.msg = r.error ? "No se pudo enviar el correo: " + r.error.message : "Listo. Si ese correo tiene cuenta, te enviamos un enlace para crear una contraseña nueva.";
+    renderModal();
+  }
+  async function setNewPassword() {
+    var md = state.modal, pass = $("f-newpass").value;
+    if (pass.length < 6) { md.msg = "La contraseña debe tener al menos 6 caracteres."; renderModal(); return; }
+    var r = await sync.client.auth.updateUser({ password: pass });
+    if (r.error) { md.msg = "No se pudo guardar: " + r.error.message; renderModal(); return; }
+    closeModal(); toast("Contraseña actualizada");
+  }
+  async function wipeCloud() {
+    var md = state.modal;
+    if (!md.confirmWipe) { md.confirmWipe = true; renderModal(); return; }
+    var r = await sync.client.from("habits").delete().eq("user_id", sync.user.id);
+    if (r.error) { md.confirmWipe = false; toast("No se pudo borrar: " + r.error.message); renderModal(); return; }
+    await sync.client.auth.signOut(); closeModal();
+    toast("Datos de la nube borrados. Tus hábitos siguen en este dispositivo.");
   }
   async function doAuth(kind) {
     var md = state.modal, email = $("f-email").value.trim(), pass = $("f-pass").value;
