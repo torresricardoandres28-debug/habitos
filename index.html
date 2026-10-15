@@ -89,6 +89,7 @@ button:focus-visible, input:focus-visible, select:focus-visible { outline: 3px s
 .strip { grid-column: 2 / 4; display: flex; gap: 6px; margin-top: 4px; }
 .strip button { width: 26px; height: 26px; border-radius: 7px; border: 1.5px solid var(--line); background: transparent; font-size: 0.65rem; font-weight: 600; color: var(--ink-2); padding: 0; }
 .strip button[aria-pressed="true"] { background: var(--c); border-color: var(--c); color: var(--surface); }
+.strip button:disabled { opacity: .35; cursor: default; }
 .strip button.sel { outline: 2px solid var(--ink-2); outline-offset: 1px; }
 .add { display: block; width: 100%; margin-top: 10px; border: 1.5px dashed var(--line); background: transparent; border-radius: 16px; padding: 14px; font-weight: 600; color: var(--ink-2); }
 .add:hover { border-color: var(--accent); color: var(--accent); }
@@ -297,10 +298,11 @@ body { margin: 0; }
     list.forEach(function (h) {
       var set = daySet(h), on = set.has(selKey), st = currentStreak(h);
       var strip = "";
-      for (var i = 6; i >= 0; i--) {
-        var d = addDays(sel, -i), k = ymd(d);
+      var ws = weekStart(sel);
+      for (var i = 0; i < 7; i++) {
+        var d = addDays(ws, i), k = ymd(d), fut = d > t;
         strip += '<button data-act="day" data-id="' + h.id + '" data-key="' + k + '" aria-pressed="' + set.has(k) + '" aria-label="' + esc(d.toLocaleDateString("es", { weekday: "long", day: "numeric" })) + '"' +
-          (i === 0 ? ' class="sel"' : '') + '>' + DOW[d.getDay()] + '</button>';
+          (k === selKey ? ' class="sel"' : '') + (fut ? ' disabled' : '') + '>' + DOW[d.getDay()] + '</button>';
       }
       html += '<div class="habit" style="--c:' + hcolor(h) + '">' +
         '<button class="check" data-act="toggle" data-id="' + h.id + '" aria-pressed="' + on + '" aria-label="Marcar ' + esc(h.name) + '">' + CHECK + '</button>' +
